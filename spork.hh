@@ -24,6 +24,9 @@
 #include <algorithm>
 #include <type_traits>
 #include <optional>
+#include <thread>
+#include <mutex>
+#include <future>
 
 namespace __spork
 {
@@ -102,6 +105,82 @@ namespace __spork
         return average_time;
     }
 
+
+    template <typename Func, typename PreFunc = std::function<void()>>
+    double RunBenchmarkWithMultithread(const Func& func, int num_iterations, int num_threads,
+                                    double& min_time, double& max_time,
+                                    double& std_dev, size_t& memory_usage,
+                                    const PreFunc& pre_func = nullptr) {
+        std::vector<double> runtimes;
+        std::mutex mutex;
+
+        auto thread_func = [&](int start, int end) {
+            std::vector<double> local_runtimes;
+            for (int i = start; i < end; ++i) {
+                if (pre_func) {
+                    if constexpr (!std::is_void_v<decltype(pre_func())>) {
+                        auto pre_result = pre_func();
+                        func(pre_result);
+                    } else {
+                        pre_func();
+                        func();
+                    }
+                } else {
+                    func();
+                }
+            }
+
+            for (int i = start; i < end; ++i) {
+                auto start_time = std::chrono::high_resolution_clock::now();
+                if (pre_func) {
+                    if constexpr (!std::is_void_v<decltype(pre_func())>) {
+                        auto pre_result = pre_func();
+                        func(pre_result);
+                    } else {
+                        pre_func();
+                        func();
+                    }
+                } else {
+                    func();
+                }
+                auto end_time = std::chrono::high_resolution_clock::now();
+
+                double runtime_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
+                std::lock_guard<std::mutex> lock(mutex);
+                local_runtimes.push_back(runtime_ms);
+            }
+
+            std::lock_guard<std::mutex> lock(mutex);
+            runtimes.insert(runtimes.end(), local_runtimes.begin(), local_runtimes.end());
+        };
+
+        std::vector<std::thread> threads;
+        int iterations_per_thread = num_iterations / num_threads;
+        for (int i = 0; i < num_threads; ++i) {
+            int start = i * iterations_per_thread;
+            int end = (i == num_threads - 1) ? num_iterations : start + iterations_per_thread;
+            threads.emplace_back(thread_func, start, end);
+        }
+
+        for (auto& thread : threads) {
+            thread.join();
+        }
+
+        min_time = *std::min_element(runtimes.begin(), runtimes.end());
+        max_time = *std::max_element(runtimes.begin(), runtimes.end());
+        double average_time = std::accumulate(runtimes.begin(), runtimes.end(), 0.0) / static_cast<double>(num_iterations);
+
+        double sum_squared_diff = 0.0;
+        for (double runtime : runtimes) {
+            sum_squared_diff += (runtime - average_time) * (runtime - average_time);
+        }
+        std_dev = std::sqrt(sum_squared_diff / static_cast<double>(num_iterations));
+
+        memory_usage = GetMemoryUsage();
+
+        return average_time;
+    }
+
     std::string formatDuration(double milliseconds) {
         double runtime_ms = std::floor(milliseconds);
         double runtime_us = (milliseconds - runtime_ms) * 1000;
@@ -133,8 +212,22 @@ namespace __spork
         double min_runtime, max_runtime, std_dev;
         size_t memory_usage;
         double average_runtime = RunBenchmark(func, count, std::ref(min_runtime),
-                                                std::ref(max_runtime), std::ref(std_dev),
-                                                std::ref(memory_usage), pre_func);
+                                            std::ref(max_runtime), std::ref(std_dev),
+                                            std::ref(memory_usage), pre_func);
+
+        std::cout << "\n\n-------------------------------\n";
+        std::cout << "Average Runtime: " << formatDuration(average_runtime) << "\n";
+        std::cout << "Minimum Runtime: " << formatDuration(min_runtime) << "\n";
+        std::cout << "Maximum Runtime: " << formatDuration(max_runtime) << "\n";
+    }
+
+    template <typename Func, typename PreFunc = std::function<void()>>
+    void Benchmark(Func&& func, int count, int num_threads, PreFunc pre_func = nullptr) {
+        double min_runtime, max_runtime, std_dev;
+        size_t memory_usage;
+        double average_runtime = RunBenchmarkWithMultithread(func, count, num_threads, std::ref(min_runtime),
+                                                            std::ref(max_runtime), std::ref(std_dev),
+                                                            std::ref(memory_usage), pre_func);
 
         std::cout << "\n\n-------------------------------\n";
         std::cout << "Average Runtime: " << formatDuration(average_runtime) << "\n";
@@ -146,6 +239,11 @@ namespace __spork
 template <typename Func, typename PreFunc = std::function<void()>>
 void benchmark(Func&& func, int count, PreFunc pre_func = nullptr) {
     __spork::Benchmark(std::forward<Func>(func), count, std::forward<PreFunc>(pre_func));
+}
+
+template <typename Func, typename PreFunc = std::function<void()>>
+void benchmark(Func&& func, int count, int num_threads, PreFunc pre_func = nullptr) {
+    __spork::Benchmark(std::forward<Func>(func), count, num_threads, std::forward<PreFunc>(pre_func));
 }
 
 #endif // !_BENCHMARK_HPP_
