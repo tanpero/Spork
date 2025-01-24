@@ -59,33 +59,27 @@ namespace __spork
         std::vector<double> runtimes;
 
         for (int i = 0; i < num_iterations; ++i) {
+            double runtime_ms;
             if (pre_func) {
                 if constexpr (!std::is_void_v<decltype(pre_func())>) {
                     auto pre_result = pre_func();
+                    auto start_time = std::chrono::high_resolution_clock::now();
                     func(pre_result);
+                    auto end_time = std::chrono::high_resolution_clock::now();
+                    runtime_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
                 } else {
                     pre_func();
+                    auto start_time = std::chrono::high_resolution_clock::now();
                     func();
+                    auto end_time = std::chrono::high_resolution_clock::now();
+                    runtime_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
                 }
             } else {
-                func();
+                auto start_time = std::chrono::high_resolution_clock::now();
+                func();                
+                auto end_time = std::chrono::high_resolution_clock::now();
+                runtime_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
             }
-
-            auto start_time = std::chrono::high_resolution_clock::now();
-            if (pre_func) {
-                if constexpr (!std::is_void_v<decltype(pre_func())>) {
-                    auto pre_result = pre_func();
-                    func(pre_result);
-                } else {
-                    pre_func();
-                    func();
-                }
-            } else {
-                func();
-            }
-            auto end_time = std::chrono::high_resolution_clock::now();
-
-            double runtime_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
             runtimes.push_back(runtime_ms);
         }
 
@@ -115,37 +109,31 @@ namespace __spork
         std::mutex mutex;
 
         auto thread_func = [&](int start, int end) {
+
             std::vector<double> local_runtimes;
             for (int i = start; i < end; ++i) {
+                double runtime_ms;
                 if (pre_func) {
                     if constexpr (!std::is_void_v<decltype(pre_func())>) {
                         auto pre_result = pre_func();
+                        auto start_time = std::chrono::high_resolution_clock::now();
                         func(pre_result);
+                        auto end_time = std::chrono::high_resolution_clock::now();
+                        runtime_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
                     } else {
                         pre_func();
+                        auto start_time = std::chrono::high_resolution_clock::now();
                         func();
+                        auto end_time = std::chrono::high_resolution_clock::now();
+                        runtime_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
                     }
                 } else {
+                    auto start_time = std::chrono::high_resolution_clock::now();
                     func();
+                    auto end_time = std::chrono::high_resolution_clock::now();
+                    runtime_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
                 }
-            }
 
-            for (int i = start; i < end; ++i) {
-                auto start_time = std::chrono::high_resolution_clock::now();
-                if (pre_func) {
-                    if constexpr (!std::is_void_v<decltype(pre_func())>) {
-                        auto pre_result = pre_func();
-                        func(pre_result);
-                    } else {
-                        pre_func();
-                        func();
-                    }
-                } else {
-                    func();
-                }
-                auto end_time = std::chrono::high_resolution_clock::now();
-
-                double runtime_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
                 std::lock_guard<std::mutex> lock(mutex);
                 local_runtimes.push_back(runtime_ms);
             }
